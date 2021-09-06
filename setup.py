@@ -4,12 +4,13 @@ from setuptools import setup
 
 setup(
     name='kitti2bag',
-    version='1.5',
+    version='1.5.1',
     description='Convert KITTI dataset to ROS bag file the easy way!',
     author='Tomas Krejci',
     author_email='tomas@krej.ci',
-    url='https://github.com/tomas789/kitti2bag/',
-    download_url = 'https://github.com/tomas789/kitti2bag/archive/1.5.zip',
+    maintainer='Haoran Zhou',
+    maintainer_email='hanaro.chou@gmail.com',
+    url='https://github.com/HanaRo/kitti2bag',
     keywords = ['dataset', 'ros', 'rosbag', 'kitti'],
     entry_points = {
         'console_scripts': ['kitti2bag=kitti2bag.__main__:main'],
