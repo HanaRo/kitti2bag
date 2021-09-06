@@ -81,8 +81,8 @@ def save_dynamic_tf(bag, kitti, kitti_type, initial_time):
             tf_stamped = TransformStamped()
             tf_stamped.header.stamp = rospy.Time.from_sec(timestamp)
             tf_stamped.header.frame_id = 'world'
-            tf_stamped.child_frame_id = 'camera_left'
-            
+            tf_stamped.child_frame_id = 'odom'
+        
             t = tf_matrix[0:3, 3]
             q = tf.transformations.quaternion_from_matrix(tf_matrix)
             transform = Transform()
@@ -136,7 +136,7 @@ def save_camera_data(bag, kitti_type, kitti, util, bridge, camera, camera_frame_
     for dt, filename in bar(iterable):
         image_filename = os.path.join(image_path, filename)
         cv_image = cv2.imread(image_filename)
-        calib.width, calib.height = cv_image.shape[:2]  # why different order between source code and pip package?
+        calib.width, calib.height = cv_image.shape[:2]
         if camera in (0, 1):
             cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
         encoding = "mono8" if camera in (0, 1) else "bgr8"
@@ -232,18 +232,28 @@ def inv(transform):
     return transform_inv
 
 
-def save_static_transforms(bag, transforms, timestamps):
+def save_static_transforms(bag, kitti_type, kitti, transforms, initial_time):
     print("Exporting static transformations")
     tfm = TFMessage()
+
     for transform in transforms:
         t = get_static_transform(from_frame_id=transform[0], to_frame_id=transform[1], transform=transform[2])
         tfm.transforms.append(t)
-    for timestamp in timestamps:
-        time = rospy.Time.from_sec(float(timestamp.strftime("%s.%f")))
-        for i in range(len(tfm.transforms)):
-            tfm.transforms[i].header.stamp = time
-        bag.write('/tf_static', tfm, t=time)
 
+    if kitti_type.find('raw') != -1:
+        for timestamp in kitti.timestamps:
+            time = rospy.Time.from_sec(float(timestamp.strftime("%s.%f")))
+            for i in range(len(tfm.transforms)):
+                tfm.transforms[i].header.stamp = time
+            bag.write('/tf_static', tfm, t=time)
+
+    elif kitti_type.find('odom') != -1:
+        datetimes = map(lambda x: initial_time + x.total_seconds(), kitti.timestamps)
+        for dt in datetimes:
+            time = rospy.Time.from_sec(dt)
+            for i in range(len(tfm.transforms)):
+                tfm.transforms[i].header.stamp = time
+            bag.write('/tf_static', tfm, t=time)
 
 def save_gps_fix_data(bag, kitti, gps_frame_id, topic):
     for timestamp, oxts in zip(kitti.timestamps, kitti.oxts):
@@ -271,7 +281,7 @@ def save_gps_vel_data(bag, kitti, gps_frame_id, topic):
         bag.write(topic, twist_msg, t=twist_msg.header.stamp)
 
 
-def main():
+def run_kitti2bag():
     
     parser = argparse.ArgumentParser(description = "Convert KITTI dataset to ROS bag file the easy way!")
     # Accepted argument values
@@ -346,7 +356,7 @@ def main():
             util = pykitti.utils.read_calib_file(os.path.join(kitti.calib_path, 'calib_cam_to_cam.txt'))
 
             # Export
-            save_static_transforms(bag, transforms, kitti.timestamps)
+            save_static_transforms(bag, args.kitti_type, kitti, transforms, initial_time=None)
             save_dynamic_tf(bag, kitti, args.kitti_type, initial_time=None)
             save_imu_data(bag, kitti, imu_frame_id, imu_topic)
             save_gps_fix_data(bag, kitti, imu_frame_id, gps_fix_topic)
@@ -386,12 +396,32 @@ def main():
             kitti._load_poses()
 
         try:
+            # IMU
+            imu_frame_id = 'imu_link'
+            imu_topic = '/kitti/oxts/imu'
+            gps_fix_topic = '/kitti/oxts/gps/fix'
+            gps_vel_topic = '/kitti/oxts/gps/vel'
             velo_frame_id = 'velo_link'
             velo_topic = '/kitti/velo'
 
+            T_base_link_to_velo = np.eye(4, 4)
+            T_base_link_to_velo[0:3, 3] = [2.71/2.0-1.68-0.27, 0, 1.73]
+
+            # tf_static
+            transforms = [
+                ('base_link', velo_frame_id, T_base_link_to_velo),
+                (velo_frame_id, cameras[0][1], inv(kitti.calib.T_cam0_velo)),
+                (velo_frame_id, cameras[1][1], inv(kitti.calib.T_cam1_velo)),
+                (velo_frame_id, cameras[2][1], inv(kitti.calib.T_cam2_velo)),
+                (velo_frame_id, cameras[3][1], inv(kitti.calib.T_cam3_velo))
+            ]
+
             util = pykitti.utils.read_calib_file(os.path.join(args.dir,'sequences',args.sequence, 'calib.txt'))
             current_epoch = (datetime.utcnow() - datetime(1970, 1, 1)).total_seconds()
+
             # Export
+            save_static_transforms(bag, args.kitti_type, kitti, transforms, initial_time=current_epoch)
+
             if args.kitti_type.find("gray") != -1:
                 used_cameras = cameras[:2]
             elif args.kitti_type.find("color") != -1:
