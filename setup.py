@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name='kitti2bag',
-    version='1.5.1',
+    version='1.6',
     description='Convert KITTI dataset to ROS bag file the easy way!',
     author='Tomas Krejci',
     author_email='tomas@krej.ci',
